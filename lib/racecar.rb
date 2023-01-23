@@ -53,7 +53,11 @@ module Racecar
   end
 
   def self.producer
-    Thread.current[:racecar_producer] ||= Racecar::Producer.new(config: config, logger: logger, instrumenter: instrumenter)
+    Thread.current[:racecar_producer] ||= 
+      begin
+        logger.warn "Creating a new thread"
+        Racecar::Producer.new(config: config, logger: logger, instrumenter: instrumenter)
+      end
   end
 
   def self.instrumenter
