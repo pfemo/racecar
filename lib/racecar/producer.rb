@@ -2,8 +2,24 @@
 
 require "racecar/message_delivery_error"
 
+at_exit do
+  Racecar::Producer.shutdown!
+end
+
 module Racecar
   class Producer
+
+    @@mutex = Mutex.new
+
+    class << self
+      def shutdown!
+        @@mutex.synchronize do
+          if !@internal_producer.nil?
+            @internal_producer.close
+          end
+        end
+      end
+    end
 
     def initialize(config: nil, logger: nil, instrumenter: NullInstrumenter)
       @config = config
@@ -11,6 +27,24 @@ module Racecar
       @delivery_handles = []
       @instrumenter = instrumenter
       @batching = false
+      @internal_producer = init_internal_producer(config)
+    end
+
+    def init_internal_producer(config)
+      @@mutex.synchronize do
+        @@init_internal_producer ||= begin
+          # https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
+          producer_config = {
+            "bootstrap.servers"      => config.brokers.join(","),
+            "client.id"              => config.client_id,
+            "statistics.interval.ms" => config.statistics_interval_ms,
+            "message.timeout.ms"     => config.message_timeout * 1000,
+          }
+          producer_config["compression.codec"] = config.producer_compression_codec.to_s unless config.producer_compression_codec.nil?
+          producer_config.merge!(config.rdkafka_producer)
+          Rdkafka::Config.new(producer_config).producer
+        end
+      end
     end
 
 
@@ -64,22 +98,7 @@ module Racecar
 
     private
 
-    def internal_producer
-      @internal_producer ||= producer_config.producer
-    end
-
-    def producer_config
-      # https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
-      producer_config = {
-        "bootstrap.servers"      => @config.brokers.join(","),
-        "client.id"              => @config.client_id,
-        "statistics.interval.ms" => @config.statistics_interval_ms,
-        "message.timeout.ms"     => @config.message_timeout * 1000,
-      }
-      producer_config["compression.codec"] = @config.producer_compression_codec.to_s unless @config.producer_compression_codec.nil?
-      producer_config.merge!(@config.rdkafka_producer)
-      Rdkafka::Config.new(producer_config)
-    end
+    attr_reader :internal_producer
 
     def deliver_with_error_handling(handle)
       handle.wait
