@@ -2,6 +2,7 @@
 
 require "logger"
 
+require "racecar/datadog"
 require "racecar/instrumenter"
 require "racecar/null_instrumenter"
 require "racecar/consumer"
